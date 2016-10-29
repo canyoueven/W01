@@ -6,26 +6,34 @@
 #include <allegro5\allegro_primitives.h>
 #include <allegro5\allegro_ttf.h>
 
-//constante provizorii  1280×800, 
-const int defaultWindowW = 800, defaultWindowH = 600;
+#include "general_draw_functions.h"
 
-struct gridState {
-	bool active[3][3];
-	std::queue<int> endTimes[3][3];
-} state;
+//constante provizorii  1280×800
+const int defaultWindowW = 800, defaultWindowH = 600,
+		  frameCap = 60;
+const float prGridLinesThickness = 10.0, prBorderThickness = 10.0;
+const double frameTime = 1 / 60;
+
+gridState generalState;
+//struct gridState {
+//	bool active[3][3];
+//	std::queue<int> endTimes[3][3];
+//} generalState;
 
 ALLEGRO_EVENT_QUEUE *eventQueue;
 ALLEGRO_DISPLAY *window;
 ALLEGRO_TIMER *frameTimer;
-int windowW, windowH;
+int windowWidth, windowHeight;
 
 void deserialize() {
-	windowW = defaultWindowW;
-	windowH = defaultWindowH;
+	windowWidth = defaultWindowW;
+	windowHeight = defaultWindowH;
+
+	pass_grid_lines_thickness(prGridLinesThickness);
+	pass_border_thickness(prBorderThickness);
 }
 
 void serialize() {
-
 }
 
 bool loopEnd;
@@ -37,14 +45,17 @@ void initialize() {
 	al_install_joystick();
 
 	al_init_primitives_addon();
+	al_init_ttf_addon();
 
 	deserialize();
-	window = al_create_display(windowW, windowH);
+	window = al_create_display(windowWidth, windowHeight);
 
 	eventQueue = al_create_event_queue();
 	al_register_event_source(eventQueue, al_get_keyboard_event_source());
 
 	loopEnd = 0;
+
+	pass_window_size(windowWidth, windowHeight);
 }
 
 void end() {
@@ -56,23 +67,24 @@ void end() {
 	al_unregister_event_source(eventQueue, al_get_keyboard_event_source());
 	al_destroy_event_queue(eventQueue);
 
+	al_shutdown_primitives_addon();
+	al_shutdown_ttf_addon();
+
 	serialize();
 }
 
-void input();
+void handle_input();
 
-void move_along() {
+void handle_events() {
 
 }
 
-void draw_grid();
-void draw_run_data();
-
-void draw() {
+void draw_scene() {
 	ALLEGRO_COLOR background_color = al_map_rgb(0, 0, 0);
 
 	al_clear_to_color(background_color);
 
+	pass_grid_state(generalState);
 	draw_grid();
 	draw_run_data();
 
@@ -82,9 +94,9 @@ void draw() {
 void main_loop() {
 
 	while (!loopEnd) {
-		input();
-		move_along();
-		draw();
+		handle_input();
+		handle_events();
+		draw_scene();
 	}
 }
 
@@ -97,59 +109,17 @@ int main(int argc, char **argv) {
 	return 0;
 }
 
-void draw_grid_lines(float thickness, int cellSideLength, ALLEGRO_COLOR color) {
-	for (int i = 0; i <= 3; ++i) {
-		al_draw_line((windowW - cellSideLength * 3) / 2 + cellSideLength * (i), windowH -  cellSideLength * 3 - thickness,
-					 (windowW - cellSideLength * 3) / 2 + cellSideLength * (i), windowH,
-					 color, thickness);
-
-		al_draw_line((windowW - cellSideLength * 3) / 2, windowH - (cellSideLength * i) - thickness / 2,
-					  windowW - (windowW - cellSideLength * 3) / 2, windowH - (cellSideLength * i) - thickness / 2, 
-					  color, thickness);
-	}
-}
-
-void border(int x, int y, int cellSideLength, int thickness) {
-	ALLEGRO_COLOR borderColor = al_map_rgb(255, 0, 0);
-	al_draw_rectangle((windowW - cellSideLength * 3) / 2 + cellSideLength * x + thickness / 2, windowH - cellSideLength * (y + 1) ,
-					  (windowW - cellSideLength * 3) / 2 + cellSideLength * (x+1) - thickness / 2, windowH - cellSideLength * y - thickness,
-					  borderColor, thickness);
-}
-
-void draw_cell_borders(int cellSideLength, int thickness) {
-	for (int i = 2; i > -1; --i) {
-		for (int j = 0; j < 3; ++j) {
-			if (state.active[i][j]) {
-				border(j, i, cellSideLength, thickness);
-			}
-		}
-	}
-}
-
-void draw_grid() {
-	ALLEGRO_COLOR gridLineColor = al_map_rgb(255, 255, 255);
-	const float thickness = 10.0;
-	const int cellSideLength = (windowH * 4) / 15;
-	
-	draw_grid_lines(thickness, cellSideLength, gridLineColor);
-	draw_cell_borders(cellSideLength, thickness);
-}
-
-void draw_run_data() {
-
-}
-
 void printGridState() {
 	system("cls");
 	for (int i = 2; i > -1; --i) {
 		for (int j = 0; j < 3; ++j) {
-			std::cerr << state.active[i][j] << ' ';
+			std::cerr << generalState.active[i][j] << ' ';
 		}
 		std::cerr << '\n';
 	}
 }
 
-void input() {
+void handle_input() {
 	ALLEGRO_EVENT currentEvent;
 	while (!al_event_queue_is_empty(eventQueue)) {
 		al_get_next_event(eventQueue, &currentEvent);
@@ -157,12 +127,12 @@ void input() {
 			num1Keycode = 38;
 		
 		if (currentEvent.type == ALLEGRO_EVENT_KEY_DOWN) {
-			state.active[(currentKeycode - num1Keycode) / 3][(currentKeycode - num1Keycode) % 3] = 1;
+			generalState.active[(currentKeycode - num1Keycode) / 3][(currentKeycode - num1Keycode) % 3] = 1;
 			
 			printGridState();
 		}
 		if (currentEvent.type == ALLEGRO_EVENT_KEY_UP) {
-			state.active[(currentKeycode - num1Keycode) / 3][(currentKeycode - num1Keycode) % 3] = 0;
+			generalState.active[(currentKeycode - num1Keycode) / 3][(currentKeycode - num1Keycode) % 3] = 0;
 
 			printGridState();
 		}

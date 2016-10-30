@@ -30,5 +30,8 @@
     <ClInclude Include="general_draw_functions.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="custom_structs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

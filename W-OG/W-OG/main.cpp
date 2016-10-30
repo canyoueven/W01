@@ -1,5 +1,7 @@
 #include <iostream>
 #include <queue>
+#include <map>
+#include <string>
 #include <time.h>
 #include <Windows.h>
 
@@ -9,25 +11,47 @@
 
 #include "custom_structs.h"
 #include "general_draw_functions.h"
+#include "deserializer.h"
+#include "serializer.h"
 
-//constante provizorii  1280×800
-const int defaultWindowW = 800, defaultWindowH = 600,
+//constante provizorii
+int defaultWindowW = 800, defaultWindowH = 600,
 		  frameCap = 60,
-		  waveSpeed = 500, approachRate = 1, incrementSpeed = 25,
+		  waveSpeed = 500, approachRate = 25, incrementSpeed = 25,
 		  maxWaveSize = 2;
 const float prGridLinesThickness = 10.0, prBorderThickness = 10.0;
 const double frameTime = 1 / 60;
 
+bool play, loopEnd;
+
 gridState generalState;
+
+ALLEGRO_COLOR background_color;
 
 ALLEGRO_EVENT_QUEUE *eventQueue;
 ALLEGRO_DISPLAY *window;
 ALLEGRO_TIMER *frameTimer, *approachTimer, *waveTimer;
+
+
 int windowWidth, windowHeight;
 
 void deserialize() {
-	windowWidth = defaultWindowW;
-	windowHeight = defaultWindowH;
+	deserializer::deserialize();
+	
+	std::map<std::string, int> settingsData = deserializer::pass_data();
+
+	windowWidth = settingsData["window_width"];
+	windowHeight = settingsData["window_height"];
+	frameCap = settingsData["frame_cap"];
+	waveSpeed = settingsData["wave_speed"];
+	maxWaveSize = settingsData["wave_max_size"] - 1;
+	if (maxWaveSize < 1) {
+		maxWaveSize = 1;
+	}
+	approachRate = settingsData["approach_speed"];
+
+
+	background_color = al_map_rgb(0, 0, 0);
 
 	pass_grid_lines_thickness(prGridLinesThickness);
 	pass_border_thickness(prBorderThickness);
@@ -36,7 +60,10 @@ void deserialize() {
 void serialize() {
 }
 
-bool loopEnd;
+void stop_timers();
+void start_timers();
+void resume_timers();
+void create_timers();
 
 void initialize() {
 	al_init();
@@ -54,20 +81,13 @@ void initialize() {
 	al_register_event_source(eventQueue, al_get_keyboard_event_source());
 
 	loopEnd = 0;
+	play = 1;
 
 	srand(time(NULL));
 	pass_window_size(windowWidth, windowHeight);
-
-	frameTimer = al_create_timer(1.0 / frameCap);
-	approachTimer = al_create_timer(1.0 / 1000);
-	waveTimer = al_create_timer(1.0 / 1000);
-
-	al_start_timer(frameTimer);
-	al_start_timer(approachTimer);
-	al_start_timer(waveTimer);
-
-
-	al_set_timer_count(waveTimer, waveSpeed);
+	
+	create_timers();
+	start_timers();
 }
 
 void end() {
@@ -101,19 +121,6 @@ void randomize_matrix(bool (&matrix)[3][3]) {
 	}
 }
 
-/*void generate_next_wave() {
-	bool waveMatrix[3][3];
-	randomize_matrix(waveMatrix);
-
-	for (int i = 0; i < 3; ++i) {
-		for (int j = 0; j < 3; ++j) {
-			if (waveMatrix[i][j]) {
-				generalState.percentage[i][j].push_back(1);
-			}
-		}
-	}
-}*/
-
 void generate_next_wave() {
 	bool waveMatrix[3][3];
 	int waveSize = rand() % maxWaveSize + 1;
@@ -145,9 +152,7 @@ void check_fail_state() {
 	for (int i = 0; i < 3; ++i) {
 		for (int j = 0; j < 3; ++j) {
 			if (generalState.percentage[i][j].size() && generalState.percentage[i][j][0] >= 100) {
-				//std::cout << i << ' ' << j << '\n';
 				loopEnd = 1;
-				//system("pause");
 			}
 		}
 	}
@@ -157,7 +162,7 @@ void increment_waves() {
 	for (int i = 0; i < 3; ++i) {
 		for (int j = 0; j < 3; ++j) {
 			for (int k = 0; k < generalState.percentage[i][j].size(); ++k) {
-				generalState.percentage[i][j][k] += approachRate;
+				++generalState.percentage[i][j][k];
 			}
 		}
 	}
@@ -166,28 +171,20 @@ void increment_waves() {
 }
 
 void handle_events() {
-	/*system("cls");
-	std::cout << al_get_timer_count(approachTimer) << ' ';
-	std::cout << al_get_timer_count(waveTimer) << ' ';
-	*/
-	if (al_get_timer_count(approachTimer) >= incrementSpeed) {
-		al_set_timer_count(approachTimer, al_get_timer_count(approachTimer) - incrementSpeed);
+	if (al_get_timer_count(approachTimer) >= approachRate) {
+		al_set_timer_count(approachTimer, 0);
 
-		//std::cout << "waves incremented\n";
 		increment_waves();
 	}
 	
 	if (al_get_timer_count(waveTimer) >= waveSpeed) {
-		al_set_timer_count(waveTimer, al_get_timer_count(waveTimer) - waveSpeed);
+		al_set_timer_count(waveTimer, 0);
 
-		//std::cout << "next wave\n";
 		generate_next_wave();
 	}
 }
 
 void draw_scene() {
-	ALLEGRO_COLOR background_color = al_map_rgb(0, 0, 0);
-
 	al_clear_to_color(background_color);
 
 	pass_grid_state(generalState);
@@ -197,37 +194,113 @@ void draw_scene() {
 	al_flip_display();
 }
 
-void main_loop() {
+void game_over_screen();
 
+void restart();
+
+void initialize_grid_state();
+
+void main_loop() {
+	start_timers();
 	while (!loopEnd) {
 		handle_input();
 		handle_events();
 
 		if (al_get_timer_count(frameTimer) >= 1) {
-			al_set_timer_count(frameTimer, al_get_timer_count(frameTimer) - 1);
+			al_add_timer_count(frameTimer, -1);
 			
 			draw_scene();
 		}
 	}
+
+	game_over_screen();
 }
 
 int main(int argc, char **argv) {
 	initialize();
-	main_loop();
+
+	while (play == 1) {
+		main_loop();
+	}
 	end();
 
 	system("pause");
 	return 0;
 }
 
-void printGridState() {
-	system("cls");
-	for (int i = 2; i > -1; --i) {
-		for (int j = 0; j < 3; ++j) {
-			std::cerr << generalState.active[i][j] << ' ';
-		}
-		std::cerr << '\n';
+int some_key_down = 0;
+
+void al_wait_for_input() {
+	stop_timers();
+
+	while (!some_key_down) {
+		handle_input();
 	}
+}
+
+void game_over_screen() {
+	al_wait_for_input();
+
+		/*std::cout << "Restart in 3..\n";
+		Sleep(1000);
+		std::cout << "2..\n";
+		Sleep(1000);
+		std::cout << "1..\n";
+		Sleep(1000);*/
+
+	restart();
+}
+
+void restart() {
+	loopEnd = 0;
+
+	initialize_grid_state();
+}
+
+void initialize_grid_state() {
+	for (int i = 0; i < 3; ++i) {
+		for (int j = 0; j < 3; ++j) {
+			generalState.active[i][j] = 0;
+			while (generalState.percentage[i][j].size() > 0) {
+				generalState.percentage[i][j].pop_back();
+			}
+			//generalState.percentage[i][j].clear();
+		}
+	}
+}
+
+void init_timers() {
+	al_set_timer_count(frameTimer, 0);
+	al_set_timer_count(waveTimer, 0);
+	al_set_timer_count(approachTimer, 0);
+}
+
+void stop_timers() {
+	al_stop_timer(frameTimer);
+	al_stop_timer(waveTimer);
+	al_stop_timer(approachTimer);
+}
+
+void start_timers() {
+	al_start_timer(frameTimer);
+	al_start_timer(waveTimer);
+	al_start_timer(approachTimer);
+
+	init_timers();
+}
+
+void resume_timers() {
+	al_resume_timer(frameTimer);
+	al_resume_timer(waveTimer);
+	al_resume_timer(approachTimer);
+
+	init_timers();
+}
+
+void create_timers() {
+	frameTimer = al_create_timer(1.0 / frameCap);
+	approachTimer = al_create_timer(1.0 / 1000);
+	waveTimer = al_create_timer(1.0 / 1000);
 }
 
 void numKeyDown(int keycode) {
@@ -249,18 +322,16 @@ void handle_input() {
 			num1Keycode = 38;
 		
 		if (currentEvent.type == ALLEGRO_EVENT_KEY_DOWN) {
+			some_key_down = 1;
 			if (currentKeycode >= num1Keycode && currentKeycode <= num1Keycode + 9) {
 				numKeyDown(currentKeycode - num1Keycode);
 			}
-
-			//printGridState();
 		}
 		if (currentEvent.type == ALLEGRO_EVENT_KEY_UP) {
+			some_key_down = 0;
 			if (currentKeycode >= num1Keycode && currentKeycode <= num1Keycode + 9) {
 				generalState.active[(currentKeycode - num1Keycode) / 3][(currentKeycode - num1Keycode) % 3] = 0;
 			}
-
-			//printGridState();
 		}
 	}
 }
